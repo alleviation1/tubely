@@ -4,7 +4,11 @@ import (
 	"fmt"
 	"net/http"
 	"io"
-	"encoding/base64"
+	"os"
+	"path/filepath"
+	"log"
+	"strings"
+	"mime"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -51,9 +55,9 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	fileData, err := io.ReadAll(file)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Unable to read file", err)
+	mimeType, _, err := mime.ParseMediaType(media)
+	if err != nil || (mimeType != "image/jpeg" && mimeType != "image/png") {
+		respondWithError(w, http.StatusBadRequest, "Invalid mime type", nil)
 		return
 	}
 
@@ -67,9 +71,23 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	encodedTNUrl := base64.StdEncoding.EncodeToString(fileData)
-	newUrl := fmt.Sprintf("data:%s;base64,%s", media, encodedTNUrl)
-	video.ThumbnailURL = &newUrl
+	fileType := strings.Split(media, "/")[1]
+
+	path := filepath.Join(cfg.assetsRoot, "/", videoIDString)
+	path += "." + fileType
+	newFile, err := os.Create(path)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to make file", err)
+		return
+	}
+
+	if _, err := io.Copy(newFile, file); err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	filePath := fmt.Sprintf("http://localhost:%s/assets/%s.%s", cfg.port, videoIDString, fileType)
+	video.ThumbnailURL = &filePath
 
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
